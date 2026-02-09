@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>3D Boss Survivor: Sniper Edition</title>
+<style>
+body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #000; }
+#crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+#ui { position: absolute; top: 15px; left: 15px; color: #0f0; text-shadow: 2px 2px #000; pointer-events: none; }
+.bar-container { width: 200px; height: 10px; background: #333; margin-top: 5px; }
+
+/* 📱 Mobile Controls UI */
+#mobile-controls {
+  position: fixed;
+  bottom: 10px;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.control-left, .control-right {
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+.btn {
+  width: 50px;
+  height: 50px;
+  background: rgba(0,0,0,0.6);
+  border: 2px solid #0f0;
+  color: #0f0;
+  font-size: 18px;
+  border-radius: 10px;
+}
+.btn:active { background: rgba(0,255,0,0.4); }
+</style>
+</head>
+<body>
+
+<div id="crosshair"></div>
+<div id="ui">
+  CASH: $<span id="money">0</span> | SCORE: <span id="score">0</span><br>
+  HP: <div class="bar-container"><div id="hp-fill" style="width:100%; background:#0f0; height:100%;"></div></div>
+  STAMINA: <div class="bar-container"><div id="stamina-fill" style="width:100%; background:cyan; height:100%;"></div></div>
+</div>
+
+<!-- 📱 Mobile Buttons -->
+<div id="mobile-controls">
+  <div class="control-left">
+    <button class="btn" id="btn-left">◀</button>
+    <button class="btn" id="btn-right">▶</button>
+    <button class="btn" id="btn-forward">▲</button>
+    <button class="btn" id="btn-back">▼</button>
+  </div>
+  <div class="control-right">
+    <button class="btn" id="btn-jump">⤴</button>
+    <button class="btn" id="btn-dash">⚡</button>
+    <button class="btn" id="btn-shoot">🔫</button>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x404040), new THREE.DirectionalLight(0xffffff, 1));
+
+let money=0, score=0, hp=100, stamina=100, isOver=false, isDashing=false;
+let fireRate=500, lastFire=0;
+let jumpV=0, jumping=false;
+const keys = {}, bullets=[];
+
+function createModel(color){
+  const g=new THREE.Group();
+  const b=new THREE.Mesh(new THREE.BoxGeometry(0.8,1.4,0.5), new THREE.MeshStandardMaterial({color}));
+  b.position.y=0.7;
+  g.add(b);
+  return g;
+}
+
+const player=createModel(0x00ff00);
+scene.add(player);
+
+// 🖥️ PC Controls
+document.addEventListener('mousedown', () => {
+  if(Date.now()-lastFire>fireRate){ shoot(player); lastFire=Date.now(); }
+});
+document.addEventListener('mousemove', e => {
+  if(document.pointerLockElement) player.rotation.y -= e.movementX*0.003;
+});
+window.addEventListener('keydown', e => keys[e.code.toLowerCase()] = true);
+window.addEventListener('keyup', e => keys[e.code.toLowerCase()] = false);
+
+// 📱 Mobile Controls → map to keys
+function bindBtn(id, key){
+  const btn=document.getElementById(id);
+  btn.addEventListener('touchstart', e=>{ e.preventDefault(); keys[key]=true; });
+  btn.addEventListener('touchend', ()=> keys[key]=false);
+}
+
+bindBtn("btn-left","keya");
+bindBtn("btn-right","keyd");
+bindBtn("btn-forward","keyw");
+bindBtn("btn-back","keys");
+bindBtn("btn-jump","space");
+bindBtn("btn-dash","shiftleft");
+
+document.getElementById("btn-shoot").addEventListener("touchstart", ()=>{
+  if(Date.now()-lastFire>fireRate){ shoot(player); lastFire=Date.now(); }
+});
+
+function shoot(source){
+  const b=new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({color:0xffff00}));
+  b.position.copy(source.position);
+  b.position.y+=1.5;
+  const dir=new THREE.Vector3(0,0,-1).applyQuaternion(source.quaternion);
+  b.velocity=dir.multiplyScalar(1.6);
+  bullets.push(b);
+  scene.add(b);
+}
+
+function updateUI(){
+  document.getElementById('money').innerText=money;
+  document.getElementById('score').innerText=score;
+  document.getElementById('hp-fill').style.width=hp+"%";
+  document.getElementById('stamina-fill').style.width=stamina+"%";
+}
+
+function animate(){
+  if(isOver) return;
+  requestAnimationFrame(animate);
+
+  isDashing=(keys['shiftleft'] && stamina>10);
+  let speed=isDashing?0.6:0.22;
+  if(isDashing) stamina-=1.2; else if(stamina<100) stamina+=0.4;
+
+  if(keys['keyw']) player.translateZ(-speed);
+  if(keys['keys']) player.translateZ(speed);
+  if(keys['keya']) player.translateX(-speed);
+  if(keys['keyd']) player.translateX(speed);
+
+  if(keys['space'] && !jumping){ jumpV=0.3; jumping=true; }
+  player.position.y+=jumpV;
+  if(player.position.y>0) jumpV-=0.015;
+  else { player.position.y=0; jumpV=0; jumping=false; }
+
+  const cp=new THREE.Vector3(0,5,12).applyMatrix4(player.matrixWorld);
+  camera.position.lerp(cp,0.1);
+  camera.lookAt(player.position.clone().add(new THREE.Vector3(0,1.5,0)));
+
+  bullets.forEach((b,i)=>{
+    b.position.add(b.velocity);
+    if(b.position.length()>200){ scene.remove(b); bullets.splice(i,1); }
+  });
+
+  updateUI();
+  renderer.render(scene,camera);
+}
+
+scene.add(new THREE.GridHelper(400,80,0x00ff00,0x111111));
+animate();
+</script>
+</body>
+</html>
